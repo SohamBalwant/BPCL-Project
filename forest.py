@@ -95,5 +95,96 @@ def create_detailed_anomaly_analysis(plot_data, dist_code, days_order):
     # Create visualization
     fig = plt.figure(figsize=(20, 12))
     gs = fig.add_gridspec(2, 3)
+     
+    # 1. Transactions by Hour with Day of Week
+    ax1 = fig.add_subplot(gs[0, 0])
+    for day in days_order:
+        day_data = dist_data[dist_data['InsertedOnDayOfWeek'] == day]
+        ax1.scatter(day_data['InsertedOnHour'], day_data['TransactionCount'], 
+                   label=day, alpha=0.5)
+    ax1.set_title(f'Distributor {dist_code}: Hourly Transaction Patterns')
+    ax1.set_xlabel('Hour of Day (0-23)')
+    ax1.set_ylabel('Number of Transactions per Hour')
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    # 2. Distribution of Transactions with Anomalies
+    ax2 = fig.add_subplot(gs[0, 1])
+    sns.histplot(data=dist_data, x='TransactionCount', bins=30, color='gray', ax=ax2)
+    sns.rugplot(data=dist_data[dist_data['is_anomaly']], x='TransactionCount', 
+                color='red', ax=ax2, height=0.1)
+    ax2.set_title('Distribution of Hourly Transaction Volumes\n(Red marks = Anomalies)')
+    ax2.set_xlabel('Number of Transactions per Hour')
+    ax2.set_ylabel('Frequency')
+    
+    # 3. Z-score plot
+    ax3 = fig.add_subplot(gs[0, 2])
+    sns.scatterplot(data=dist_data, x='zscore', y='TransactionCount', 
+                    hue='is_anomaly', palette={True: 'red', False: 'blue'}, 
+                    ax=ax3)
+    ax3.set_title('Deviation from Normal Pattern\nRed = Anomalous Hours')
+    ax3.set_xlabel('Standard Deviations from Mean')
+    ax3.set_ylabel('Number of Transactions per Hour')
+    
+    
+    # 4. Heatmap
+    ax4 = fig.add_subplot(gs[1, :2])
+    pivot_data = dist_data.pivot_table(
+        values='TransactionCount', 
+        index='InsertedOnDayOfWeek', 
+        columns='InsertedOnHour', 
+        aggfunc='mean'
+    ).reindex(days_order)
+    
+    sns.heatmap(pivot_data, cmap='YlOrRd', ax=ax4, fmt='.0f',
+                cbar_kws={'label': 'Average Transactions per Hour'})
+    ax4.set_title('Average Hourly Transactions by Day of Week')
+    ax4.set_xlabel('Hour of Day (0-23)')
+
+    
+    # 5. Summary statistics
+    ax5 = fig.add_subplot(gs[1, 2])
+    ax5.axis('off')
+    
+    # Calculate peak hours
+    peak_hour = dist_data.groupby('InsertedOnHour')['TransactionCount'].mean().idxmax()
+    peak_day = dist_data.groupby('InsertedOnDayOfWeek')['TransactionCount'].mean().idxmax()
+    
+    summary_stats = [
+        f"Distributor Code: {dist_code}",
+        f"Total Transactions: {dist_data['TransactionCount'].sum():,}",
+        f"Average Transactions per Hour: {dist_data['TransactionCount'].mean():.1f}",
+        f"Busiest Hour: {peak_hour}:00",
+        f"Busiest Day: {peak_day}",
+        f"Maximum Transactions in One Hour: {dist_data['TransactionCount'].max()}",
+        f"Number of Anomalous Hours: {dist_data['is_anomaly'].sum()}",
+        f"Percent of Hours Flagged: {(dist_data['is_anomaly'].mean() * 100):.1f}%",
+        "\nHow to Read This Analysis:",
+        "1. Each point represents one hour's transactions",
+        "2. Red points are unusual transaction patterns",
+        "3. Heatmap shows typical patterns by day/hour",
+        "4. Z-score shows how unusual each hour is",
+        "\nAnomalies are flagged when:",
+        "• Transaction count is unusually high/low for that time",
+        "• Pattern doesn't match typical day/hour pattern",
+        "• Volume deviates significantly from average"
+    ]
+    ax5.text(0, 1, '\n'.join(summary_stats), va='top', fontsize=10)
+    
+    plt.tight_layout()
+    plt.show()
+
+def analyze_anomalies(file_path, top_n=20):
+    """
+    Main function to analyze anomalies in transaction data
+    """
+    # Preprocessing
+    df = preprocess_data(file_path)
+    df_hour = (
+        df.groupby(["DistCode", "InsertedOnHour", "InsertedOnDayOfWeek"])
+        .size()
+        .reset_index(name="TransactionCount")
+    )
+
+    print(df_hour)
     
   
