@@ -187,4 +187,54 @@ def analyze_anomalies(file_path, top_n=20):
 
     print(df_hour)
     
-  
+  # Get top distributors
+    top_dists = df_hour.groupby('DistCode')['TransactionCount'].sum() \
+                       .sort_values(ascending=False).head(top_n).index
+    
+    # Prepare data
+    plot_data = df_hour[df_hour['DistCode'].isin(top_dists)].copy()
+    
+    # Add features
+    days_order = [
+        "Monday", "Tuesday", "Wednesday", "Thursday",
+        "Friday", "Saturday", "Sunday"
+    ]
+    
+    plot_data["HourSin"] = np.sin(2 * np.pi * plot_data["InsertedOnHour"] / 24)
+    plot_data["HourCos"] = np.cos(2 * np.pi * plot_data["InsertedOnHour"] / 24)
+    plot_data["DayNum"] = plot_data["InsertedOnDayOfWeek"].map(
+        lambda x: days_order.index(x)
+    )
+
+    # Detect anomalies for each distributor
+    features = ['TransactionCount', 'HourSin', 'HourCos', 'DayNum']
+    anomalies_by_dist = {}
+    
+    for dist in top_dists:
+        dist_data = plot_data[plot_data['DistCode'] == dist].copy()
+        X = dist_data[features]
+        
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        iso_forest = IsolationForest(contamination=0.1, random_state=42)
+        predictions = iso_forest.fit_predict(X_scaled)
+        plot_data.loc[plot_data['DistCode'] == dist, 'is_anomaly'] = predictions == -1
+        
+        # Store anomalies
+        anomalies = dist_data[predictions == -1].copy()
+        anomalies_by_dist[dist] = anomalies
+
+    # 1. Overview Plot (Violin + Strip plot)
+    plt.figure(figsize=(15, 8))
+    sns.violinplot(data=plot_data, x='DistCode', y='TransactionCount', 
+                  color='lightgray', inner=None)
+    sns.stripplot(data=plot_data, x='DistCode', y='TransactionCount',
+                 hue='is_anomaly', palette={False: 'blue', True: 'red'},
+                 size=4, alpha=0.6)
+    plt.xticks(rotation=45)
+    plt.title('Transaction Distribution by Distributor with Anomalies')
+    plt.xlabel('Distributor Code')
+    plt.ylabel('Transaction Count')
+    plt.tight_layout()
+    plt.show() 
