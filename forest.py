@@ -238,3 +238,102 @@ def analyze_anomalies(file_path, top_n=20):
     plt.ylabel('Transaction Count')
     plt.tight_layout()
     plt.show() 
+
+# 2. Detailed Analysis for Top 5 Distributors
+    for dist_code in list(top_dists)[:5]:  # Analyze top 5 distributors
+        create_detailed_anomaly_analysis(plot_data, dist_code, days_order)
+
+    return anomalies_by_dist, plot_data
+
+
+def flag_anomalies_isolation_forest(top_n=20):
+    df = preprocess_data("./cleaned-failure.csv")
+
+    # # df_date = df.groupby(['DistCode', 'InsertedOnDate']).size().reset_index(name='TransactionCount')
+    df_hour = (
+        df.groupby(["DistCode", "InsertedOnHour", "InsertedOnDayOfWeek"])
+        .size()
+        .reset_index(name="TransactionCount")
+    )
+
+    total_transactions = (
+        df_hour.groupby("DistCode")["TransactionCount"].sum().reset_index()
+    )
+
+    sorted_transactions = total_transactions.sort_values(
+        by="TransactionCount", ascending=False
+    )
+
+    dist_dfs = []
+    for index, row in sorted_transactions.iterrows():
+        dist_code = row["DistCode"]
+        rd_df = df_hour[df_hour["DistCode"] == dist_code]
+        dist_dfs.append(rd_df)
+        if len(dist_dfs) == 10:
+            break
+
+    days_order = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
+
+    df_hour["HourSin"] = np.sin(2 * np.pi * df_hour["InsertedOnHour"] / 24)
+    df_hour["HourCos"] = np.cos(2 * np.pi * df_hour["InsertedOnHour"] / 24)
+    df_hour["DayNum"] = df_hour["InsertedOnDayOfWeek"].map(
+        lambda x: days_order.index(x)
+    )
+
+    plot_distributor_df(dist_dfs, days_order)
+
+    print(df_hour)
+
+    # get top distributors
+    top_dists = df_hour.groupby('DistCode')['TransactionCount'].sum() \
+                       .sort_values(ascending=False).head(top_n).index
+    
+    # filter the data
+    plot_data = df_hour[df_hour['DistCode'].isin(top_dists)].copy()
+    
+    # features wed use
+    features = ['TransactionCount', 'HourSin', 'HourCos', 'DayNum']
+    
+    # detect anomalies for each distributor
+    for dist in top_dists:
+        dist_data = plot_data[plot_data['DistCode'] == dist]
+        X = dist_data[features]
+        
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        iso_forest = IsolationForest(contamination=0.1, random_state=42)
+        plot_data.loc[plot_data['DistCode'] == dist, 'is_anomaly'] = \
+            iso_forest.fit_predict(X_scaled) == -1
+    
+    
+    plt.figure(figsize=(15, 8))
+    
+    # violin plot for distribution
+    sns.violinplot(data=plot_data, x='DistCode', y='TransactionCount', 
+                  color='lightgray', inner=None)
+    
+    # Overlay strip plot with color-coded anomalies
+    sns.stripplot(data=plot_data, x='DistCode', y='TransactionCount',
+                 hue='is_anomaly', palette={False: 'blue', True: 'red'},
+                 size=4, alpha=0.6)
+    
+    plt.xticks(rotation=45)
+    plt.title('Transaction Distribution by Distributor with Anomalies')
+    plt.xlabel('Distributor Code')
+    plt.ylabel('Transaction Count')
+    plt.tight_layout()
+    plt.show()
+
+
+# analyze_anomalies("./cleaned-failure.csv")
+flag_anomalies_isolation_forest()
+
