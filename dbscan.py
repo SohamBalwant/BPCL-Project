@@ -231,3 +231,120 @@ class AnomalyDetector:
             )
 
         return pd.DataFrame(report)
+    
+    def plot_weekly_patterns(self, df, anomalies, results, limit=20):
+        """Plot transaction patterns with each week-day combination as a separate line."""
+        df = df.copy()
+        df['InsertedOn'] = pd.to_datetime(df['InsertedOn'], errors='coerce')
+        df = df.dropna(subset=['InsertedOn'])
+        
+        df['week'] = df['InsertedOn'].dt.isocalendar().week.astype(int)
+        df['day'] = df['InsertedOn'].dt.dayofweek
+        df['hour'] = df['InsertedOn'].dt.hour
+        
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+        top_distributors = (
+        df.groupby('DistCode').size()
+        .sort_values(ascending=False)
+        .head(limit)
+        .index
+    )
+        
+        # Create a color map with different shades for each day
+        day_colors = plt.cm.Set2(np.linspace(0, 1, 7))  # Base colors for days
+        
+        for dist_code in top_distributors:
+            dist_data = df[df['DistCode'] == dist_code]
+            if len(dist_data) == 0:
+                continue
+                
+            fig, ax = plt.subplots(figsize=(15, 8))
+            
+            # Get unique weeks for this distributor
+            unique_weeks = sorted(dist_data['week'].unique())
+            
+            # Plot each week-day combination
+            for week in unique_weeks:
+                week_data = dist_data[dist_data['week'] == week]
+                
+                for day_num, day_name in enumerate(days):
+                    day_data = week_data[week_data['day'] == day_num]
+                    if len(day_data) > 0:  # Only plot if there's data for this day
+                        hourly_counts = day_data.groupby('hour').size().reindex(range(24), fill_value=0)
+                        
+                        # Use base color for the day but adjust alpha for different weeks
+                        base_color = day_colors[day_num]
+                        line_color = (*base_color[:3], 0.7)  # Adjust transparency
+                        
+                        ax.plot(range(24), 
+                            hourly_counts,
+                            label=f'Week {week} {day_name}',
+                            color=line_color,
+                            marker='o',
+                            markersize=4,
+                            linewidth=1.5)
+            
+            # Customize the plot
+            ax.set_title(f'Distributor {dist_code} - Transaction Patterns\nWeeks {min(unique_weeks)}-{max(unique_weeks)}', 
+                        fontsize=14, pad=20)
+            ax.set_xlabel('Hour of Day', fontsize=12)
+            ax.set_ylabel('Number of Transactions', fontsize=12)
+            ax.grid(True, linestyle='--', alpha=0.7)
+            ax.set_xticks(range(24))
+            ax.set_xticklabels([f'{hour:02d}:00' for hour in range(24)], rotation=45)
+            
+            # Highlight business hours
+            ax.axvspan(9, 17, color='yellow', alpha=0.1, label='Business Hours')
+            
+            # Add legend with multiple columns for better space usage
+            ncol = min(3, len(unique_weeks) * 7 // 10 + 1)  # Adjust number of columns based on total lines
+            ax.legend(bbox_to_anchor=(1.05, 1), 
+                    loc='upper left', 
+                    ncol=ncol,
+                    fontsize=8)
+            
+            plt.tight_layout()
+            plt.savefig(f"weekly-for-${dist_code}")
+                        
+
+
+
+
+
+
+# Main function to run analysis
+def analyze_anomalies(df):
+    detector = AnomalyDetector(contamination=0.1)
+    results = detector.detect_anomalies(df)
+
+    # Visualize DBSCAN clusters and anomalies
+    fig = detector.visualize_results(results)
+
+    # Generate a detailed report on anomalous distributors
+    anomalous_report = detector.generate_anomalous_report(
+        df, results["anomalies"], results
+    )
+    print("REPORT: ")
+    print(anomalous_report)
+
+    anomalous_report.to_csv("anomalous.csv")
+
+
+    pattern_fig = detector.plot_weekly_patterns(df, results['anomalies'], results)
+
+
+    # Calculate anomaly percentage
+    total_anomalies = len(results["anomalies"])
+    total_distributors = len(results["dist_codes"])
+    anomaly_percentage = (total_anomalies / total_distributors) * 100
+    print(f"Anomaly Percentage: {anomaly_percentage:.2f}%")
+
+    return results, fig, anomalous_report
+
+
+# Example usage
+df = pd.read_csv("./cleaned-failure.csv")
+results, fig, anomalous_report = analyze_anomalies(df)
+
+print(results)
